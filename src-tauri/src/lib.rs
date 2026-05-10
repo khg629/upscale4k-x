@@ -87,6 +87,19 @@ fn random_id() -> String {
     format!("{nanos:x}")
 }
 
+/// Tauri의 app.path().resolve()가 Windows에서 `\\?\` extended-length 접두어를
+/// 붙여 반환할 수 있는데, ncnn-vulkan은 이 접두어를 처리하지 못해 _wfopen이 실패한다.
+/// (실측: `\\?\C:\Users\...` → 0xC0000409 STACK_BUFFER_OVERRUN)
+/// 접두어를 제거한 일반 절대 경로로 변환.
+fn strip_unc_prefix(path: &Path) -> PathBuf {
+    let s = path.to_string_lossy();
+    if let Some(stripped) = s.strip_prefix(r"\\?\") {
+        PathBuf::from(stripped.to_string())
+    } else {
+        path.to_path_buf()
+    }
+}
+
 /// ncnn-vulkan은 Windows에서 한글/유니코드 경로 처리에 버그가 있어
 /// stack overrun을 일으킨다. 모든 OS에서 ASCII 보장된 임시 폴더에서 작업한다.
 fn ascii_workdir() -> PathBuf {
@@ -166,6 +179,7 @@ async fn upscale_image(
         .path()
         .resolve("resources/models", BaseDirectory::Resource)
         .map_err(|e| format!("models 디렉토리 해석 실패: {e}"))?;
+    let models_dir = strip_unc_prefix(&models_dir);
     let models_dir_str = models_dir
         .to_str()
         .ok_or_else(|| "models 경로가 UTF-8 아님".to_string())?;
