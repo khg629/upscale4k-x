@@ -1,0 +1,26 @@
+.DS_Store
+node_modules
+/build
+/.svelte-kit
+/package
+.env
+.env.*
+!.env.example
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+
+# Tauri 빌드 산출물
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# 외부 다운로드 자원 (대용량, README에 다운로드 안내)
+src-tauri/binaries/realesrgan-aarch64-apple-darwin
+src-tauri/binaries/realesrgan-x86_64-apple-darwin
+src-tauri/binaries/realesrgan-x86_64-pc-windows-msvc.exe
+src-tauri/binaries/win-deps/
+src-tauri/resources/models/
+
+# 에디터
+.vscode/*
+!.vscode/extensions.json
+.idea/
