@@ -34,9 +34,6 @@ jobs:
         with:
           node-version: 22
 
-      - name: Use latest npm
-        run: npm install -g npm@latest
-
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -48,7 +45,12 @@ jobs:
           workspaces: src-tauri
 
       - name: Install npm deps
-        run: npm install
+        shell: bash
+        run: |
+          # CI에서는 lockfile을 안 쓰고 fresh resolve — 플랫폼별 optional 의존성
+          # (예: @rollup/rollup-{darwin,win32,linux}-*) 미스매치를 회피.
+          rm -f package-lock.json
+          npm install
 
       - name: Download ncnn (macOS)
         if: matrix.platform == 'macos-latest'
