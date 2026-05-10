@@ -78,13 +78,35 @@ fn build_output_path(
     }
 }
 
-fn temp_intermediate_path() -> PathBuf {
+fn random_id() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    std::env::temp_dir().join(format!("upscale4k_{nanos}.png"))
+    format!("{nanos:x}")
+}
+
+/// ncnn-vulkan은 Windows에서 한글/유니코드 경로 처리에 버그가 있어
+/// stack overrun을 일으킨다. 모든 OS에서 ASCII 보장된 임시 폴더에서 작업한다.
+fn ascii_workdir() -> PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        // C:\Users\Public\UpScale4K_temp — 사용자명이 한글이어도 ASCII 보장
+        if let Ok(public) = std::env::var("PUBLIC") {
+            let dir = PathBuf::from(public).join("UpScale4K_temp");
+            if std::fs::create_dir_all(&dir).is_ok() {
+                return dir;
+            }
+        }
+        let fallback = PathBuf::from(r"C:\Users\Public\UpScale4K_temp");
+        let _ = std::fs::create_dir_all(&fallback);
+        fallback
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::env::temp_dir()
+    }
 }
 
 fn resize_to_factor(input: &Path, output: &Path, factor: f64) -> Result<(), String> {
@@ -125,11 +147,20 @@ async fn upscale_image(
 
     // ncnn은 항상 4×로 호출. 사용자가 2× / 3× 선택했으면 결과를 다운스케일.
     let needs_downscale = args.scale != 4;
-    let inference_output = if needs_downscale {
-        temp_intermediate_path()
-    } else {
-        final_output.clone()
-    };
+
+    // ★ 한글/유니코드 경로에서 ncnn-vulkan이 stack overrun을 일으키는 버그를
+    //   회피하기 위해, 입력·출력을 ASCII 보장된 임시 폴더로 복사·격리한다.
+    let workdir = ascii_workdir();
+    let id = random_id();
+    let ext = input
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("png");
+    let temp_input = workdir.join(format!("upscale4k_in_{id}.{ext}"));
+    let temp_inference = workdir.join(format!("upscale4k_infer_{id}.png"));
+
+    std::fs::copy(&input, &temp_input)
+        .map_err(|e| format!("임시 입력 복사 실패: {e}"))?;
 
     let models_dir = app
         .path()
@@ -144,8 +175,8 @@ async fn upscale_image(
         .sidecar("realesrgan")
         .map_err(|e| format!("sidecar 찾지 못함: {e}"))?
         .args([
-            "-i", input.to_str().ok_or("input 경로 UTF-8 아님")?,
-            "-o", inference_output.to_str().ok_or("output 경로 UTF-8 아님")?,
+            "-i", temp_input.to_str().ok_or("temp input UTF-8 아님")?,
+            "-o", temp_inference.to_str().ok_or("temp output UTF-8 아님")?,
             "-n", &args.model,
             "-s", "4",
             "-m", models_dir_str,
@@ -187,23 +218,50 @@ async fn upscale_image(
     *state.current_child.lock().unwrap() = None;
 
     if signal_kill {
-        let _ = std::fs::remove_file(&inference_output);
+        let _ = std::fs::remove_file(&temp_input);
+        let _ = std::fs::remove_file(&temp_inference);
         return Err("CANCELLED".to_string());
     }
 
     if exit_code != Some(0) {
-        let _ = std::fs::remove_file(&inference_output);
-        let snippet: String = stderr_buf.chars().take(300).collect();
+        let _ = std::fs::remove_file(&temp_input);
+        let _ = std::fs::remove_file(&temp_inference);
+        let snippet: String = stderr_buf.chars().take(1500).collect();
         return Err(format!("ncnn 실패 (exit {exit_code:?}): {snippet}"));
     }
 
-    if needs_downscale {
-        if let Err(e) = resize_to_factor(&inference_output, &final_output, args.scale as f64 / 4.0) {
-            let _ = std::fs::remove_file(&inference_output);
+    // 다운스케일 (필요시): temp_inference → temp_resized
+    let temp_to_publish = if needs_downscale {
+        let temp_resized = workdir.join(format!("upscale4k_resize_{id}.png"));
+        if let Err(e) = resize_to_factor(&temp_inference, &temp_resized, args.scale as f64 / 4.0) {
+            let _ = std::fs::remove_file(&temp_input);
+            let _ = std::fs::remove_file(&temp_inference);
             return Err(e);
         }
-        let _ = std::fs::remove_file(&inference_output);
+        let _ = std::fs::remove_file(&temp_inference);
+        temp_resized
+    } else {
+        temp_inference
+    };
+
+    // 최종 출력 폴더 보장
+    if let Some(parent) = final_output.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            let _ = std::fs::remove_file(&temp_input);
+            let _ = std::fs::remove_file(&temp_to_publish);
+            return Err(format!("출력 폴더 생성: {e}"));
+        }
     }
+
+    // 임시 결과 → 사용자 지정/입력 옆 위치로 복사
+    if let Err(e) = std::fs::copy(&temp_to_publish, &final_output) {
+        let _ = std::fs::remove_file(&temp_input);
+        let _ = std::fs::remove_file(&temp_to_publish);
+        return Err(format!("최종 출력 복사: {e}"));
+    }
+
+    let _ = std::fs::remove_file(&temp_input);
+    let _ = std::fs::remove_file(&temp_to_publish);
 
     Ok(final_output.to_string_lossy().into_owned())
 }
