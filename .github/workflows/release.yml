@@ -1,0 +1,105 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  # 수동 실행 (테스트 용도). Actions 탭에서 "Run workflow" 클릭.
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+            ncnn_zip_url: https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-20220424-macos.zip
+            ncnn_bin: realesrgan-ncnn-vulkan
+            sidecar_name: realesrgan-aarch64-apple-darwin
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            ncnn_zip_url: https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-20220424-windows.zip
+            ncnn_bin: realesrgan-ncnn-vulkan.exe
+            sidecar_name: realesrgan-x86_64-pc-windows-msvc.exe
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install npm deps
+        run: npm ci
+
+      - name: Download ncnn (macOS)
+        if: matrix.platform == 'macos-latest'
+        shell: bash
+        run: |
+          mkdir -p src-tauri/binaries src-tauri/resources/models
+          curl -L "${{ matrix.ncnn_zip_url }}" -o ncnn.zip
+          unzip -q -o ncnn.zip -d ncnn_extract
+          cp "ncnn_extract/${{ matrix.ncnn_bin }}" "src-tauri/binaries/${{ matrix.sidecar_name }}"
+          chmod +x "src-tauri/binaries/${{ matrix.sidecar_name }}"
+          cp -R ncnn_extract/models/* src-tauri/resources/models/
+          rm -rf ncnn_extract ncnn.zip
+          ls -la src-tauri/binaries src-tauri/resources/models | head -20
+
+      - name: Download ncnn (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path src-tauri/binaries, src-tauri/resources/models | Out-Null
+          Invoke-WebRequest -Uri "${{ matrix.ncnn_zip_url }}" -OutFile ncnn.zip
+          Expand-Archive -Path ncnn.zip -DestinationPath ncnn_extract -Force
+          Copy-Item "ncnn_extract/${{ matrix.ncnn_bin }}" "src-tauri/binaries/${{ matrix.sidecar_name }}"
+          Copy-Item "ncnn_extract/models/*" "src-tauri/resources/models/" -Recurse -Force
+          Remove-Item -Recurse -Force ncnn_extract, ncnn.zip
+          Get-ChildItem src-tauri/binaries, src-tauri/resources/models | Select-Object -First 20
+
+      - name: Build & Release (Tauri)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || format('manual-{0}', github.run_number) }}
+          releaseName: 'UpScale4K-x ${{ github.ref_type == ''tag'' && github.ref_name || format(''manual-{0}'', github.run_number) }}'
+          releaseBody: |
+            ## 다운로드
+
+            - **macOS (Apple Silicon)**: `UpScale4K_*_aarch64.dmg`
+            - **Windows (x64)**: `UpScale4K_*_x64-setup.exe` (NSIS 인스톨러) 또는 `UpScale4K_*_x64_en-US.msi`
+
+            ## 설치
+
+            ### macOS
+            1. `.dmg` 더블클릭 → UpScale4K를 Applications로 드래그
+            2. 첫 실행 시 우클릭 → "열기" (한 번만)
+
+            ### Windows
+            1. `*-setup.exe` 또는 `*.msi` 실행
+            2. SmartScreen 경고 시: "추가 정보" → "실행"
+            3. 마법사 진행
+
+            > **Windows에서 ncnn 실행 오류 (`vcomp140.dll` 못 찾음)** 발생 시 [Microsoft Visual C++ Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe) 설치 후 재실행하세요. (대부분의 Windows 10/11 PC에 이미 설치돼 있음)
+
+            상세 사용법은 [README](https://github.com/khg629/upscale4k-x#readme) 참고.
+          releaseDraft: ${{ github.ref_type != 'tag' }}
+          prerelease: false
+          args: --target ${{ matrix.target }}
