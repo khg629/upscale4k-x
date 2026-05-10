@@ -7,6 +7,9 @@ on:
   # 수동 실행 (테스트 용도). Actions 탭에서 "Run workflow" 클릭.
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:
