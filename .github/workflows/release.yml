@@ -33,7 +33,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -46,7 +45,7 @@ jobs:
           workspaces: src-tauri
 
       - name: Install npm deps
-        run: npm ci
+        run: npm install
 
       - name: Download ncnn (macOS)
         if: matrix.platform == 'macos-latest'

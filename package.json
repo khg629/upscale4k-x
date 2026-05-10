@@ -1,7 +1,7 @@
 {
   "name": "upscale4k-x",
   "version": "0.1.0",
-  "description": "",
+  "description": "Local image 4x upscaler for macOS, Windows, Linux. Real-ESRGAN + ncnn-vulkan + Tauri.",
   "type": "module",
   "scripts": {
     "dev": "vite dev",
