@@ -252,6 +252,12 @@
               aria-label="제거">✕</button
             >
           </div>
+          {#if item.status.kind === "failed"}
+            <div class="error-detail">
+              <span class="error-icon">⚠️</span>
+              <pre>{item.status.message}</pre>
+            </div>
+          {/if}
         {/each}
       </div>
     {/if}
@@ -446,6 +452,28 @@
     cursor: pointer;
     font-size: 0.85rem;
   }
+  .error-detail {
+    display: flex;
+    gap: 8px;
+    padding: 6px 12px 8px 36px;
+    margin-bottom: 4px;
+    background: #fff0ef;
+    border-left: 3px solid #ff3b30;
+    border-radius: 0 6px 6px 0;
+    font-size: 0.8rem;
+    color: #cc2a20;
+  }
+  .error-detail pre {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.78rem;
+    flex: 1;
+  }
+  .error-icon {
+    flex: 0 0 auto;
+  }
   .remove:hover:not(:disabled) {
     background: #ff3b30;
     color: white;
@@ -626,9 +654,11 @@
     button:hover:not(:disabled) {
       background: #48484a;
     }
-    .error {
+    .error,
+    .error-detail {
       background: #4a1f1c;
-      color: #ff453a;
+      color: #ff8a82;
+      border-color: #ff453a;
     }
   }
 </style>
